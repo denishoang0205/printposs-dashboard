@@ -123,11 +123,10 @@ window.addEventListener('DOMContentLoaded', () => {
                             // So we need to re-implement the processFile logic here briefly, or move processFile out.
                             const reader = new FileReader();
                             reader.onload = e => {
-                                let encoding = 'utf-8';
-                                try {
-                                    new TextDecoder('utf-8', { fatal: true }).decode(e.target.result);
-                                } catch (err) {
-                                    encoding = 'windows-1252';
+                                const bytes = new Uint8Array(e.target.result);
+                                let encoding = 'windows-1252'; // Default for VN Excel
+                                if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+                                    encoding = 'utf-8'; // Excel CSV UTF-8 always has BOM
                                 }
                                 Papa.parse(blob, {
                                     header: true, skipEmptyLines: true, worker: true,
@@ -300,11 +299,10 @@ function processMultipleCSVs(files) {
     const processFile = (file, callback) => {
         const reader = new FileReader();
         reader.onload = e => {
-            let encoding = 'utf-8';
-            try {
-                new TextDecoder('utf-8', { fatal: true }).decode(e.target.result);
-            } catch (err) {
-                encoding = 'windows-1252';
+            const bytes = new Uint8Array(e.target.result);
+            let encoding = 'windows-1252'; // Default for VN Excel
+            if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+                encoding = 'utf-8';
             }
             Papa.parse(file, {
                 header: true, skipEmptyLines: true, worker: true,
