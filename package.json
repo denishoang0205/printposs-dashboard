@@ -1,0 +1,9 @@
+{
+  "name": "printposs-dashboard",
+  "version": "1.0.0",
+  "description": "Printposs KPI Dashboard",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {}
+}

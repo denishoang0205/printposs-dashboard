@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Printposs KPI Dashboard | Order Lifecycle Analytics</title>
+    <meta name="description" content="Comprehensive KPI dashboard for Printposs order lifecycle analytics - tracking paid orders, delivery, production, and logistics performance.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <span>Printposs.com</span>
+            </div>
+            <nav id="main-nav">
+                <a href="#" class="nav-item" data-tab="upload">
+                    <i data-lucide="upload-cloud"></i>
+                    <span>Upload Data</span>
+                </a>
+                <hr class="nav-divider">
+                <a href="#" class="nav-item active hidden-pre-upload" data-tab="dashboard">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+            </nav>
+
+            <!-- Sidebar Filters -->
+            <div class="sidebar-filters hidden-pre-upload" style="display:flex; flex-direction:column; gap:16px; padding: 24px 16px; flex: 1; overflow-y: auto;">
+                <div class="filter-container">
+                    <i data-lucide="user" class="filter-icon" title="Seller"></i>
+                    <select id="seller-filter" class="select-filter" style="width: 100%;">
+                        <option value="all">All Sellers</option>
+                    </select>
+                </div>
+                <div class="filter-container">
+                    <i data-lucide="calendar" class="filter-icon" title="Year"></i>
+                    <select id="year-filter" class="select-filter" style="width: 100%;">
+                        <option value="all">All Years</option>
+                    </select>
+                </div>
+                <div class="filter-container">
+                    <i data-lucide="calendar-days" class="filter-icon" title="Month"></i>
+                    <select id="month-filter" class="select-filter" style="width: 100%;">
+                        <option value="all">All Months</option>
+                        <option value="1">T1</option><option value="2">T2</option>
+                        <option value="3">T3</option><option value="4">T4</option>
+                        <option value="5">T5</option><option value="6">T6</option>
+                        <option value="7">T7</option><option value="8">T8</option>
+                        <option value="9">T9</option><option value="10">T10</option>
+                        <option value="11">T11</option><option value="12">T12</option>
+                    </select>
+                </div>
+                <div class="filter-container date-range-container" style="flex-direction:column; align-items:stretch; gap:8px; padding:12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <i data-lucide="sliders" class="filter-icon" title="Date Range"></i>
+                        <span style="font-size:0.8rem; color:var(--text-muted)">Date Range</span>
+                    </div>
+                    <input type="date" id="start-date" class="date-input-filter" title="Từ ngày" style="width:100%;">
+                    <input type="date" id="end-date" class="date-input-filter" title="Đến ngày" style="width:100%;">
+                </div>
+                <button class="btn-secondary" id="btn-reset" style="width:100%; justify-content:center; margin-top:8px;">
+                    <i data-lucide="rotate-ccw"></i> Reset Filters
+                </button>
+            </div>
+
+            <div class="sidebar-footer" style="display:flex; justify-content:space-between; align-items:center; padding: 16px; border-top: 1px solid var(--border-color);">
+                <div class="sidebar-footer-text order-count-wrapper" style="display:flex; align-items:center; gap: 8px;">
+                    <i data-lucide="database" style="width:14px;height:14px;opacity:0.5"></i>
+                    <span id="sidebar-order-count">0 orders</span>
+                </div>
+                <button id="btn-sidebar-toggle" class="btn-icon" style="padding:4px;" title="Toggle Sidebar">
+                    <i data-lucide="panel-left-close"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div>
+                    <h1 class="page-title" id="page-title">Upload Data</h1>
+                    <p class="page-subtitle" id="page-subtitle">Upload CSV files to analyze order lifecycle data.</p>
+                </div>
+                <div class="user-profile" style="display:flex; align-items:center; gap: 16px;">
+                    <button id="btn-theme-toggle" class="btn-icon" style="padding:6px; margin-right: 12px;" title="Toggle Light/Dark Theme">
+                        <i data-lucide="sun"></i>
+                    </button>
+                    <div class="avatar">PP</div>
+                </div>
+            </header>
+
+            <div class="content-scroll">
+
+                <!-- Upload Section -->
+                <section id="tab-upload" class="tab-pane active">
+                    <div class="upload-wrapper">
+                        <div class="upload-zone" id="drop-zone">
+                            <i data-lucide="folder-open" class="upload-icon"></i>
+                            <h2>Select Data Folder</h2>
+                            <p>Select the "data" folder containing your CSV files. The system will aggregate all data cumulatively.</p>
+                            <input type="file" id="file-input" webkitdirectory directory multiple hidden>
+                            <button class="btn-primary" onclick="document.getElementById('file-input').click()">
+                                Select Folder
+                            </button>
+                        </div>
+                        <div id="upload-status" class="status-message hidden">
+                            <i data-lucide="loader-2" class="spin"></i> Processing data...
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Dashboard Section (Single Unified Tab) -->
+                <section id="tab-dashboard" class="tab-pane hidden">
+
+                    <!-- KPIs -->
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrap blue"><i data-lucide="credit-card"></i></div>
+                            <div class="kpi-info">
+                                <h3>Total Order</h3>
+                                <p id="kpi-paid">0</p>
+                                <p class="kpi-subtitle">Total volume of successfully paid orders.</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrap orange"><i data-lucide="alert-circle"></i></div>
+                            <div class="kpi-info">
+                                <h3>Ticket Rate</h3>
+                                <p id="kpi-ticket-rate">0%</p>
+                                <p class="kpi-subtitle">Percentage of orders requiring refund or reprint.</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrap indigo"><i data-lucide="clock"></i></div>
+                            <div class="kpi-info">
+                                <h3>Avg Production Time</h3>
+                                <p id="kpi-avg-prod">0h</p>
+                                <p class="kpi-subtitle">Lead time from payment to dispatch (incl. design adjustments).</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrap amber"><i data-lucide="truck"></i></div>
+                            <div class="kpi-info">
+                                <h3>Avg Shipping Time (WD)</h3>
+                                <p id="kpi-avg-ship">0d</p>
+                                <p class="kpi-subtitle">Average domestic transit time via USPS.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </section>
+
+            </div>
+        </main>
+    <script src="app.js"></script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
