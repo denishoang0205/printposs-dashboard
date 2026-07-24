@@ -561,7 +561,7 @@ function getStatusClass(status) {
 // ============================================================
 function renderDashboard() {
     const data = getFilteredData();
-    const active = data.filter(d => !d.status.toLowerCase().includes('cancel'));
+    const active = data; // Include canceled orders
 
     // ---- KPI 1: Total Order ----
     const totalOrder = active.length;
