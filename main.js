@@ -446,7 +446,7 @@ function transformData(rawData) {
         const isH = order.factory_raw && order.factory_raw.toLowerCase().includes('hoson');
 
         const cr = e['order_created'], pa = e['order_paid'], di = e['order_dispatched'], sh = e['order_shipped'], de = e['order_delivered'];
-        let sl_lt = null, op_lt = null, pr_lt = null, lg_lt = null;
+        let sl_lt = null, op_lt = null, pr_lt = null, lg_lt = null, ship_wd = null;
         let sl_sla = 'Pending', op_sla = 'Pending', pr_sla = 'Pending', lg_sla = 'Pending';
 
         if (isCan) {
@@ -456,7 +456,11 @@ function transformData(rawData) {
             if (pa && di) { op_lt = (di - pa) / 36e5; op_sla = op_lt <= 1 ? 'Achieved' : 'Overdue'; } else if (pa) op_sla = 'In Progress';
             const ps = isH ? pa : di;
             if (ps && sh) { pr_lt = (sh - ps) / 36e5; pr_sla = pr_lt <= 24 ? 'Achieved' : 'Overdue'; } else if (ps) pr_sla = 'In Progress';
-            if (sh && de) { lg_lt = (de - sh) / 36e5; lg_sla = lg_lt <= 168 ? 'Achieved' : 'Overdue'; } else if (sh) lg_sla = 'In Progress';
+            if (sh && de) { 
+                lg_lt = (de - sh) / 36e5; 
+                lg_sla = lg_lt <= 168 ? 'Achieved' : 'Overdue'; 
+                ship_wd = getWorkingDays(sh, de);
+            } else if (sh) lg_sla = 'In Progress';
         }
 
         return {
@@ -465,7 +469,7 @@ function transformData(rawData) {
             cohort_date: formatDateOnly(baseDate),
             created_at: formatDateTime(cr), paid_at: formatDateTime(pa),
             dispatched_at: formatDateTime(di), shipped_at: formatDateTime(sh), delivered_at: formatDateTime(de),
-            sl_lt, sl_sla, op_lt, op_sla, pr_lt, pr_sla, lg_lt, lg_sla,
+            sl_lt, sl_sla, op_lt, op_sla, pr_lt, pr_sla, lg_lt, lg_sla, ship_wd,
             created_obj: cr, paid_obj: pa, delivered_obj: de,
             has_ticket: order.has_ticket
         };
