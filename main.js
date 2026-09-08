@@ -418,12 +418,12 @@ function transformData(rawData) {
         const id = row.order_number || row['order number'];
         if (!id) return;
         if (!orderMap.has(id)) {
-            orderMap.set(id, { order_number: id, cohort_date_obj: null, status: null, factory_raw: null, seller: null, has_ticket: false, events: {} });
+            orderMap.set(id, { order_number: id, cohort_date_obj: null, status: null, factory_raw: null, seller: null, has_ticket: false, events: {}, _tempRows: [] });
         }
         const order = orderMap.get(id);
-        const orderStatus = row.order_status || row['order status'];
+        const orderStatus = row.order_status || row['order status'] || row.status;
         if (orderStatus && !order.status) order.status = orderStatus;
-        const fp = row.fulfillment_partner || row['fulfillment partner'];
+        const fp = row.fulfillment_partner || row['fulfillment partner'] || row.factory;
         if (fp && !order.factory_raw) order.factory_raw = fp.trim();
         const sv = row.seller_name || row.seller || row['seller name'];
         if (sv && !order.seller) order.seller = sv.trim();
@@ -433,13 +433,39 @@ function transformData(rawData) {
         if (tv && tv.trim().toLowerCase() === 'x') order.has_ticket = true;
 
         const eventName = row.event_name || row['event name'];
-        const updateDate = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
-        if (eventName) order.events[eventName] = updateDate;
-        const createdOrderDate = row.created_order || row['created order'] || row.created_at || row['created at'];
-        if (createdOrderDate && !order.cohort_date_obj) order.cohort_date_obj = parseCustomDate(createdOrderDate);
+        const d1 = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
+        const d2 = parseCustomDate(row.created_order || row['created order'] || row.created_at || row['created at']);
+        
+        order._tempRows.push({ eventName, d1, d2 });
     });
 
     return Array.from(orderMap.values()).map(order => {
+        let d1_varies = false;
+        let d2_varies = false;
+        let first_d1 = order._tempRows[0].d1;
+        let first_d2 = order._tempRows[0].d2;
+        
+        for (let r of order._tempRows) {
+            if (r.d1 && first_d1 && r.d1.getTime() !== first_d1.getTime()) d1_varies = true;
+            if (r.d2 && first_d2 && r.d2.getTime() !== first_d2.getTime()) d2_varies = true;
+        }
+
+        let eventKey = 'd1'; // Default: update_order is event timestamp
+        let baseKey = 'd2';
+        if (d2_varies && !d1_varies) {
+            eventKey = 'd2'; // Swapped: created_order is event timestamp
+            baseKey = 'd1';
+        }
+
+        for (let r of order._tempRows) {
+            if (r.eventName && r[eventKey]) {
+                order.events[r.eventName] = r[eventKey];
+            }
+            if (r[baseKey] && !order.cohort_date_obj) {
+                order.cohort_date_obj = r[baseKey];
+            }
+        }
+        
         const e = order.events;
         const baseDate = order.cohort_date_obj || e['order_created'] || new Date();
         const isCan = order.status && order.status.toLowerCase().includes('cancel');
