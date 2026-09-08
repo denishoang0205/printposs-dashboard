@@ -350,8 +350,9 @@ function deduplicateRawData(arr) {
         const id = row.order_number || row['order number'];
         if (!id) return false;
         const eventName = row.event_name || row['event name'] || '';
-        const updateOrder = row.update_order || row['update order'] || '';
-        const key = id.trim() + '|' + eventName.trim() + '|' + updateOrder.trim();
+        const updateOrder = row.update_order || row['update order'] || row.updated_at || row['updated at'] || '';
+        const createdOrder = row.created_order || row['created order'] || row.created_at || row['created at'] || '';
+        const key = id.trim() + '|' + eventName.trim() + '|' + updateOrder.toString().trim() + '|' + createdOrder.toString().trim();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -360,17 +361,33 @@ function deduplicateRawData(arr) {
 
 // === Date Utilities ===
 function parseCustomDate(dateStr) {
-    if (!dateStr || typeof dateStr !== 'string') return null;
-    let p = new Date(dateStr.trim());
+    if (!dateStr) return null;
+    if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+    if (typeof dateStr === 'number') {
+        return new Date(Math.round((dateStr - 25569) * 86400 * 1000));
+    }
+    if (typeof dateStr !== 'string') return null;
+    let s = dateStr.trim();
+    if (!s || s === '-') return null;
+
+    let p = new Date(s);
     if (!isNaN(p.getTime())) return p;
+    p = new Date(s.replace(' ', 'T'));
+    if (!isNaN(p.getTime())) return p;
+
     try {
-        const [dp, tp] = dateStr.trim().split(' ');
+        const [dp, tp] = s.split(' ');
         if (!dp) return null;
-        const [m, d, y] = dp.split('/');
-        const hm = tp ? tp.split(':') : ['0', '0'];
-        p = new Date(y, m - 1, d, hm[0], hm[1] || '0');
-        return isNaN(p.getTime()) ? null : p;
-    } catch (e) { return null; }
+        const parts = dp.split(/[/.-]/);
+        if (parts.length === 3) {
+            let [m, d, y] = parts.map(Number);
+            if (y < 100) y += 2000;
+            const hm = tp ? tp.split(':').map(Number) : [0, 0, 0];
+            p = new Date(y, m - 1, d, hm[0] || 0, hm[1] || 0, hm[2] || 0);
+            if (!isNaN(p.getTime())) return p;
+        }
+    } catch (e) {}
+    return null;
 }
 
 function formatDateTime(date) {
@@ -418,7 +435,14 @@ function transformData(rawData) {
         const id = row.order_number || row['order number'];
         if (!id) return;
         if (!orderMap.has(id)) {
-            orderMap.set(id, { order_number: id, cohort_date_obj: null, status: null, factory_raw: null, seller: null, has_ticket: false, events: {}, _tempRows: [] });
+            orderMap.set(id, {
+                order_number: id,
+                status: null,
+                factory_raw: null,
+                seller: null,
+                has_ticket: false,
+                _tempRows: []
+            });
         }
         const order = orderMap.get(id);
         const orderStatus = row.order_status || row['order status'] || row.status;
@@ -428,61 +452,94 @@ function transformData(rawData) {
         const sv = row.seller_name || row.seller || row['seller name'];
         if (sv && !order.seller) order.seller = sv.trim();
 
-        // Ticket detection
-        const tv = row.ticket;
-        if (tv && tv.trim().toLowerCase() === 'x') order.has_ticket = true;
+        // Ticket detection resilient to spaces/casing
+        let tv = null;
+        for (let key in row) {
+            if (key && key.toLowerCase().includes('ticket')) {
+                tv = row[key];
+                break;
+            }
+        }
+        if (tv && String(tv).trim().toLowerCase() === 'x') order.has_ticket = true;
 
         const eventName = row.event_name || row['event name'];
         const d1 = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
         const d2 = parseCustomDate(row.created_order || row['created order'] || row.created_at || row['created at']);
-        
+
         order._tempRows.push({ eventName, d1, d2 });
     });
 
+    // Dataset-wide detection of dominant event date column
+    let datasetD1Varies = 0;
+    let datasetD2Varies = 0;
+    orderMap.forEach(order => {
+        const firstD1 = order._tempRows.find(r => r.d1)?.d1;
+        const firstD2 = order._tempRows.find(r => r.d2)?.d2;
+        if (firstD1 && order._tempRows.some(r => r.d1 && r.d1.getTime() !== firstD1.getTime())) datasetD1Varies++;
+        if (firstD2 && order._tempRows.some(r => r.d2 && r.d2.getTime() !== firstD2.getTime())) datasetD2Varies++;
+    });
+    const defaultEventKey = datasetD2Varies > datasetD1Varies ? 'd2' : 'd1';
+
     return Array.from(orderMap.values()).map(order => {
-        let d1_varies = false;
-        let d2_varies = false;
-        let first_d1 = order._tempRows[0].d1;
-        let first_d2 = order._tempRows[0].d2;
-        
-        for (let r of order._tempRows) {
-            if (r.d1 && first_d1 && r.d1.getTime() !== first_d1.getTime()) d1_varies = true;
-            if (r.d2 && first_d2 && r.d2.getTime() !== first_d2.getTime()) d2_varies = true;
-        }
+        const firstD1 = order._tempRows.find(r => r.d1)?.d1;
+        const firstD2 = order._tempRows.find(r => r.d2)?.d2;
+        const d1_varies = firstD1 ? order._tempRows.some(r => r.d1 && r.d1.getTime() !== firstD1.getTime()) : false;
+        const d2_varies = firstD2 ? order._tempRows.some(r => r.d2 && r.d2.getTime() !== firstD2.getTime()) : false;
 
-        let eventKey = 'd1'; // Default: update_order is event timestamp
-        let baseKey = 'd2';
+        let eventKey = defaultEventKey;
         if (d2_varies && !d1_varies) {
-            eventKey = 'd2'; // Swapped: created_order is event timestamp
-            baseKey = 'd1';
+            eventKey = 'd2'; // created_order is event timestamp (e.g. cus_metrics.csv)
+        } else if (d1_varies && !d2_varies) {
+            eventKey = 'd1'; // update_order is event timestamp (e.g. productiontimec.xlsx)
         }
 
+        const events = {};
+        let earliestDate = null;
+
         for (let r of order._tempRows) {
-            if (r.eventName && r[eventKey]) {
-                order.events[r.eventName] = r[eventKey];
+            const evDate = r[eventKey];
+            if (r.eventName && evDate) {
+                events[r.eventName] = evDate;
             }
-            if (r[baseKey] && !order.cohort_date_obj) {
-                order.cohort_date_obj = r[baseKey];
+            const candDate = r.d2 || r.d1;
+            if (candDate) {
+                if (!earliestDate || candDate < earliestDate) earliestDate = candDate;
             }
         }
-        
-        const e = order.events;
-        const baseDate = order.cohort_date_obj || e['order_created'] || new Date();
+
+        // Order Creation Date:
+        // Priority 1: order_created event
+        // Priority 2: if eventKey is 'd1' (productiontimec), d2 is the static order creation timestamp
+        // Priority 3: order_ready_for_payment or order_paid
+        // Priority 4: earliest event date
+        let baseDate = events['order_created'];
+        if (!baseDate && eventKey === 'd1' && firstD2) {
+            baseDate = firstD2;
+        }
+        if (!baseDate) {
+            baseDate = events['order_ready_for_payment'] || events['order_paid'] || earliestDate || new Date();
+        }
+
         const isCan = order.status && order.status.toLowerCase().includes('cancel');
         const isH = order.factory_raw && order.factory_raw.toLowerCase().includes('hoson');
 
-        const cr = e['order_created'], pa = e['order_paid'], di = e['order_dispatched'], sh = e['order_shipped'], de = e['order_delivered'];
+        const cr = events['order_created'] || baseDate;
+        const pa = events['order_paid'];
+        const di = events['order_dispatched'];
+        const sh = events['order_shipped'];
+        const de = events['order_delivered'];
+
         let sl_lt = null, op_lt = null, pr_lt = null, lg_lt = null, ship_wd = null;
         let sl_sla = 'Pending', op_sla = 'Pending', pr_sla = 'Pending', lg_sla = 'Pending';
 
         if (isCan) {
             sl_sla = op_sla = pr_sla = lg_sla = 'Cancelled';
         } else {
-            if (cr && pa) { sl_lt = (pa - cr) / 36e5; sl_sla = sl_lt <= 24 ? 'Achieved' : 'Overdue'; } else if (cr) sl_sla = 'In Progress';
-            if (pa && di) { op_lt = (di - pa) / 36e5; op_sla = op_lt <= 1 ? 'Achieved' : 'Overdue'; } else if (pa) op_sla = 'In Progress';
+            if (cr && pa && pa >= cr) { sl_lt = (pa - cr) / 36e5; sl_sla = sl_lt <= 24 ? 'Achieved' : 'Overdue'; } else if (cr) sl_sla = 'In Progress';
+            if (pa && di && di >= pa) { op_lt = (di - pa) / 36e5; op_sla = op_lt <= 1 ? 'Achieved' : 'Overdue'; } else if (pa) op_sla = 'In Progress';
             const ps = isH ? pa : di;
-            if (ps && sh) { pr_lt = (sh - ps) / 36e5; pr_sla = pr_lt <= 24 ? 'Achieved' : 'Overdue'; } else if (ps) pr_sla = 'In Progress';
-            if (sh && de) { 
+            if (ps && sh && sh >= ps) { pr_lt = (sh - ps) / 36e5; pr_sla = pr_lt <= 24 ? 'Achieved' : 'Overdue'; } else if (ps) pr_sla = 'In Progress';
+            if (sh && de && de >= sh) { 
                 lg_lt = (de - sh) / 36e5; 
                 lg_sla = lg_lt <= 168 ? 'Achieved' : 'Overdue'; 
                 ship_wd = getWorkingDays(sh, de);
@@ -490,13 +547,22 @@ function transformData(rawData) {
         }
 
         return {
-            order_number: order.order_number, status: order.status || '-',
-            factory: maskFactory(order.factory_raw), seller: order.seller || 'Unknown',
+            order_number: order.order_number,
+            status: order.status || '-',
+            factory: maskFactory(order.factory_raw),
+            seller: order.seller || 'Unknown',
             cohort_date: formatDateOnly(baseDate),
-            created_at: formatDateTime(cr), paid_at: formatDateTime(pa),
-            dispatched_at: formatDateTime(di), shipped_at: formatDateTime(sh), delivered_at: formatDateTime(de),
+            created_at: formatDateTime(cr),
+            paid_at: formatDateTime(pa),
+            dispatched_at: formatDateTime(di),
+            shipped_at: formatDateTime(sh),
+            delivered_at: formatDateTime(de),
             sl_lt, sl_sla, op_lt, op_sla, pr_lt, pr_sla, lg_lt, lg_sla, ship_wd,
-            created_obj: cr, paid_obj: pa, delivered_obj: de,
+            created_obj: baseDate,
+            paid_obj: pa,
+            dispatched_obj: di,
+            shipped_obj: sh,
+            delivered_obj: de,
             has_ticket: order.has_ticket
         };
     });
@@ -517,25 +583,26 @@ function mergeNewOrders(newOrders) {
             if (n.has_ticket) m.has_ticket = true;
 
             ['created_at', 'paid_at', 'dispatched_at', 'shipped_at', 'delivered_at'].forEach(f => { if (n[f] !== '-') m[f] = n[f]; });
-            ['created_obj', 'paid_obj', 'delivered_obj'].forEach(f => { if (n[f]) m[f] = n[f]; });
+            ['created_obj', 'paid_obj', 'dispatched_obj', 'shipped_obj', 'delivered_obj'].forEach(f => { if (n[f]) m[f] = n[f]; });
 
             // Recalculate SLA
             const isH = m.factory === HOSON_MASKED;
-            const isCan = m.status.toLowerCase().includes('cancel');
+            const isCan = m.status && m.status.toLowerCase().includes('cancel');
             const cr = m.created_obj, pa = m.paid_obj;
-            const di = m.dispatched_at !== '-' ? parseCustomDate(m.dispatched_at) : null;
-            const sh = m.shipped_at !== '-' ? parseCustomDate(m.shipped_at) : null;
+            const di = m.dispatched_obj;
+            const sh = m.shipped_obj;
             const de = m.delivered_obj;
 
             if (isCan) {
                 m.sl_sla = m.op_sla = m.pr_sla = m.lg_sla = 'Cancelled';
                 m.sl_lt = m.op_lt = m.pr_lt = m.lg_lt = null;
+                m.ship_wd = null;
             } else {
-                if (cr && pa) { m.sl_lt = (pa - cr) / 36e5; m.sl_sla = m.sl_lt <= 24 ? 'Achieved' : 'Overdue'; }
-                if (pa && di) { m.op_lt = (di - pa) / 36e5; m.op_sla = m.op_lt <= 1 ? 'Achieved' : 'Overdue'; }
+                if (cr && pa && pa >= cr) { m.sl_lt = (pa - cr) / 36e5; m.sl_sla = m.sl_lt <= 24 ? 'Achieved' : 'Overdue'; }
+                if (pa && di && di >= pa) { m.op_lt = (di - pa) / 36e5; m.op_sla = m.op_lt <= 1 ? 'Achieved' : 'Overdue'; }
                 const ps = isH ? pa : di;
-                if (ps && sh) { m.pr_lt = (sh - ps) / 36e5; m.pr_sla = m.pr_lt <= 24 ? 'Achieved' : 'Overdue'; }
-                if (sh && de) { m.lg_lt = (de - sh) / 36e5; m.lg_sla = m.lg_lt <= 168 ? 'Achieved' : 'Overdue'; m.ship_wd = getWorkingDays(sh, de); }
+                if (ps && sh && sh >= ps) { m.pr_lt = (sh - ps) / 36e5; m.pr_sla = m.pr_lt <= 24 ? 'Achieved' : 'Overdue'; }
+                if (sh && de && de >= sh) { m.lg_lt = (de - sh) / 36e5; m.lg_sla = m.lg_lt <= 168 ? 'Achieved' : 'Overdue'; m.ship_wd = getWorkingDays(sh, de); }
             }
             map.set(n.order_number, m);
         } else {
@@ -604,14 +671,14 @@ function renderDashboard() {
 
     // ---- KPI 6: Avg Production Time (h) ----
     const shipped = active.filter(d => d.pr_lt != null);
-    const avgProd = shipped.length > 0 ? (shipped.reduce((s, d) => s + d.pr_lt, 0) / shipped.length).toFixed(1) : '0';
+    const avgProd = shipped.length > 0 ? (shipped.reduce((s, d) => s + d.pr_lt, 0) / shipped.length).toFixed(1) : '0.0';
     document.getElementById('kpi-avg-prod').innerText = avgProd + 'h';
 
 
 
     // ---- KPI: Avg Shipping Time (Working Days) ----
     const deliveredWd = active.filter(d => d.ship_wd != null);
-    const avgShipWd = deliveredWd.length > 0 ? (deliveredWd.reduce((s, d) => s + d.ship_wd, 0) / deliveredWd.length).toFixed(1) : '0';
+    const avgShipWd = deliveredWd.length > 0 ? (deliveredWd.reduce((s, d) => s + d.ship_wd, 0) / deliveredWd.length).toFixed(1) : '0.0';
     const elShip = document.getElementById('kpi-avg-ship');
     if (elShip) elShip.innerText = avgShipWd + 'd';
 }
