@@ -461,14 +461,7 @@ function transformData(rawData) {
                 if (tv && String(tv).trim()) break;
             }
         }
-        const isTicketFlag = tv && (String(tv).trim().toLowerCase() === 'x' || String(tv).trim() === '1');
-
-        // Check for refund (payment_status or event_name) as defined by "refund or reprint"
-        const ps = (row.payment_status || row['payment status'] || '').toLowerCase();
-        const ev = (row.event_name || row['event name'] || '').toLowerCase();
-        const isRefund = ps.includes('refund') || ev.includes('refund');
-
-        if (isTicketFlag || isRefund) order.has_ticket = true;
+        if (tv && (String(tv).trim().toLowerCase() === 'x' || String(tv).trim() === '1')) order.has_ticket = true;
 
         const eventName = row.event_name || row['event name'];
         const d1 = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
