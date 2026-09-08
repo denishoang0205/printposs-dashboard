@@ -433,9 +433,9 @@ function transformData(rawData) {
         if (tv && tv.trim().toLowerCase() === 'x') order.has_ticket = true;
 
         const eventName = row.event_name || row['event name'];
-        const updateDate = parseCustomDate(row.update_order || row['update order']);
+        const updateDate = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
         if (eventName) order.events[eventName] = updateDate;
-        const createdOrderDate = row.created_order || row['created order'];
+        const createdOrderDate = row.created_order || row['created order'] || row.created_at || row['created at'];
         if (createdOrderDate && !order.cohort_date_obj) order.cohort_date_obj = parseCustomDate(createdOrderDate);
     });
 
