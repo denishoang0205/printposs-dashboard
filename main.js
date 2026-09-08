@@ -452,15 +452,23 @@ function transformData(rawData) {
         const sv = row.seller_name || row.seller || row['seller name'];
         if (sv && !order.seller) order.seller = sv.trim();
 
-        // Ticket detection resilient to spaces/casing
+        // Ticket / Error detection resilient to column naming, spaces and casing
         let tv = null;
         for (let key in row) {
-            if (key && key.toLowerCase().includes('ticket')) {
+            const k = key ? key.toLowerCase().replace(/[\s_]/g, '') : '';
+            if (k.includes('ticket') || k.includes('checkordernumber') || k.includes('checkorder') || k === 'check' || k.includes('reprint')) {
                 tv = row[key];
-                break;
+                if (tv && String(tv).trim()) break;
             }
         }
-        if (tv && String(tv).trim().toLowerCase() === 'x') order.has_ticket = true;
+        const isTicketFlag = tv && (String(tv).trim().toLowerCase() === 'x' || String(tv).trim() === '1');
+
+        // Check for refund (payment_status or event_name) as defined by "refund or reprint"
+        const ps = (row.payment_status || row['payment status'] || '').toLowerCase();
+        const ev = (row.event_name || row['event name'] || '').toLowerCase();
+        const isRefund = ps.includes('refund') || ev.includes('refund');
+
+        if (isTicketFlag || isRefund) order.has_ticket = true;
 
         const eventName = row.event_name || row['event name'];
         const d1 = parseCustomDate(row.update_order || row['update order'] || row.updated_at || row['updated at']);
@@ -666,7 +674,8 @@ function renderDashboard() {
 
     // ---- KPI 4: Ticket Rate ----
     const ticketOrders = active.filter(d => d.has_ticket);
-    const ticketRate = active.length > 0 ? ((ticketOrders.length / active.length) * 100).toFixed(1) : '0';
+    const rateVal = active.length > 0 ? (ticketOrders.length / active.length) * 100 : 0;
+    const ticketRate = rateVal === 0 ? '0.0' : (rateVal < 0.1 ? rateVal.toFixed(2) : rateVal.toFixed(1));
     document.getElementById('kpi-ticket-rate').innerText = ticketRate + '%';
 
     // ---- KPI 6: Avg Production Time (h) ----
